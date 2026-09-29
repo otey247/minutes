@@ -2,7 +2,7 @@
 
 > Generated file. Do not edit by hand.
 > Source: manifest.json + crates/mcp/src/index.ts + site/lib/skills-catalog.json
-> Last generated: 2026-09-25
+> Last generated: 2026-09-29
 
 ## Product
 
@@ -209,6 +209,10 @@ Workflow-level skills that wrap MCP tools into operator motions. Install in Clau
   - Description: Prepare a meeting-sourced closeout for governed review in X1.
   - Example: `/minutes-x1-closeout capital call review`
   - Docs: https://useminutes.app/for-agents#minutes-x1-closeout
+- `/minutes-x1-send-meeting` — Get a meeting's decisions and follow-ups into your X1 household review queue without pasting a transcript or letting the agent write your record.
+  - Description: Send a meeting's outcomes to your X1 review queue after you approve it in X1.
+  - Example: `/minutes-x1-send-meeting estate plan review with our attorney`
+  - Docs: https://useminutes.app/for-agents#minutes-x1-send-meeting
 - `/minutes-weekly` — See weekly themes, stale commitments, and what deserves attention next.
   - Description: Weekly meeting synthesis — themes, decision arcs, stale commitments, and what deserves your attention next week.
   - Example: `/minutes-weekly`
