@@ -44,8 +44,9 @@ an endpoint, or save the meeting somewhere else in X1.
      item, with `title` from `task`, `owner` from `assignee` when it isn't
      empty, and `dueDate` from `due` only when it is already `YYYY-MM-DD`.
      Skip items whose `status` is `done`.
-   - `openQuestions`: one string per question the summary leaves open, if
-     any are stated.
+   - `openQuestions`: the `what` of each `intents` entry whose `kind` is
+     `open-question`. If there are none, send `[]`. Don't write your own
+     list, so the same meeting always maps to the same content.
    - `participants`: `{ email, name }` only for attendees whose email
      Minutes shows. X1 uses emails only to recognize the household's own
      professionals and drops them before anything is stored. Minutes usually
@@ -92,10 +93,11 @@ an endpoint, or save the meeting somewhere else in X1.
    more, keep the most important entries and tell the user what you left
    out. Never cut a single entry mid-sentence to make it fit.
 
-5. Set `idempotencyKey` to `minutes-x1:<own or the clientId>:<externalMeetingId>`,
-   cut to its first 120 characters so a suffix still fits under X1's
-   128-character limit. Asking again with unchanged content then returns the
-   same request instead of a duplicate.
+5. Set `idempotencyKey` to `mx1:<externalMeetingId>:<own or the clientId>`,
+   cut to its first 110 characters so a suffix still fits under X1's
+   128-character limit. The meeting id comes first so a cut never merges two
+   meetings. Asking again with unchanged content then returns the same
+   request instead of a duplicate.
 
 6. Call X1 `request_human_confirmation` with `toolName: "submit_my_meeting"`,
    the `arguments` from step 4, and the `idempotencyKey`. Show the user
@@ -109,13 +111,17 @@ an endpoint, or save the meeting somewhere else in X1.
 - `effectState: "replayed"` means this meeting was already requested with
   the same content. If `status` is `pending_review`, show its review link
   instead of asking again. If the earlier request expired, was cancelled, or
-  was declined and the user wants to send it now, add `:2` to the key (then
-  `:3`, and so on) and ask again.
+  was declined and the user wants to send it now, ask again with the next
+  suffix (see below). Any other status means it was already sent: show the
+  status and stop. Don't send it again.
 - "That idempotency key was already used for different action details"
-  means an earlier request for this meeting had different content. Add the
-  next suffix (`:2`, `:3`, and so on, at most five tries), ask again, and
-  tell the user the earlier request may still be waiting in X1 to be
-  cancelled.
+  means an earlier request for this meeting had different content. Ask
+  again with the next suffix, and tell the user the earlier request may
+  still be waiting in X1 to be cancelled.
+- Suffixes: `:2` through `:5`, then today's date (`:YYYYMMDD`, then
+  `:YYYYMMDD-2`, and so on), so a meeting can always be sent again. Try at
+  most five keys per request, since each refused try counts toward X1's
+  hourly limit.
 - "You do not have access to request this action" means X1 won't take a
   send for that household right now. Say so plainly and stop. Don't retry
   with another household or tool.
