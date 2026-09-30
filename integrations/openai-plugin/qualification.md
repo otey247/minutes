@@ -11,7 +11,7 @@ and live qualification. The dirty canonical checkout was preserved.
 
 | Proof | Current evidence |
 | --- | --- |
-| OAuth source/protocol | Standalone prototype; 29 tests pass. Tokens, transport responses and signing keys in tests are synthetic. Missing MIME headers and empty terminal output still require valid SSE and confirmed completion; finished assistant messages are released only after `response.completed`; the success page removes callback query parameters with a CSP-authorized script. |
+| OAuth source/protocol | Standalone prototype; 29 tests pass on Linux and silverbook/macOS. Test fixtures resolve macOS temporary-directory symlinks; production symlink rejection is unchanged. Tokens, transport responses and signing keys in tests are synthetic. Missing MIME headers and empty terminal output still require valid SSE and confirmed completion; finished assistant messages are released only after `response.completed`; the success page removes callback query parameters with a CSP-authorized script. |
 | Skill source/compiler | Five canonical skills packaged; 36 compiler tests pass, with routing, resolver, ownership, generated-output and golden checks. |
 | Codex discovery | CLI 0.159.1 lists `minutes@minutes` v0.1.0 as available using a local marketplace config override. |
 | Codex installation | `plugin add` succeeds and `plugin list` shows installed/enabled in an isolated bubblewrap profile. The user's normal Codex profile was not enabled. |

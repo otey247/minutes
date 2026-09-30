@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Store } from '../store.mjs';
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(tmpdir(), 'minutes-plan-store-'));
+  // macOS temp paths contain /var -> /private/var. Use a physical test root
+  // while continuing to test the store's rejection of symlink ancestors.
+  const root = await mkdtemp(path.join(await realpath(tmpdir()), 'minutes-plan-store-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
