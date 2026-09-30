@@ -18,15 +18,17 @@ and live qualification. The dirty canonical checkout was preserved.
 | Published MCP runtime | `minutes-mcp@0.27.0` plus checksum-verified released Linux CLI v0.27.0 passes a real stdio sample-corpus check: five meetings, two pricing sources, current reversal, outside-corpus denial. No model calls or real meeting reads. |
 | Existing Silvercloud profile | Initial MCP qualification fails closed on installed CLI v0.18.0. A v0.27.0 child using existing host state then reports unconfirmed legacy QMD cleanup. No host engine upgrade or QMD repair was performed. |
 | Sample sandbox | Qualification overlays separate sample config/state and released CLI only inside the child filesystem. This is an isolated sample-install receipt, not proof the existing host profile's QMD issue is resolved. |
-| Browser sign-in | Launched on silverbook in a separate prototype directory. The ten-minute window expired without a verified callback. No live identity or inference receipt; a fresh browser attempt is required when the user is available. |
+| Browser sign-in | First ten-minute window expired without a verified callback. Mat subsequently explicitly authorized live qualification; a fresh attempt reached OpenAI's `/choose-an-account` screen on silverbook. Chrome exposes no debugging connection, disables AppleScript JavaScript, and has no accessible AX window for this SSH session. Account selection and consent must be completed in that browser. No verified callback, live identity or inference receipt yet. |
 | Attention asset | Prepared sample illustration and 60-second walkthrough. Browser rendering, both source disclosures, source link destinations and mobile width checked with agent-browser. The illustration explicitly labels its answer as prepared. No public posting or attention result. |
 | Native desktop / public directory | Neither is activated by this tranche. A public submission needs a remote HTTPS MCP endpoint and acceptance; the local package does not meet that distribution gate. |
 
 The separate browser-qualification copy is
 `/Users/silverbook/Sites/minutes-openai-qualification.4FCLga`; its credentials, if
 consent completes, stay in the documented prototype store. It uses Node 22.23.2
-and loopback port 18765. The expired listener has stopped. Do not collect tokens
-or callback URLs as evidence.
+and loopback port 18765. Every attempt expires after ten minutes; after expiry,
+start `login --port 18765` again and open the printed local URL on silverbook.
+Do not collect tokens or callback URLs as evidence. User authorization to the
+agent is recorded; no further permission request is needed for the sample demo.
 
 Live acceptance requires verified sign-in, catalog discovery, one completed
 sample response with correct dated citations, successful logout/revocation, and
