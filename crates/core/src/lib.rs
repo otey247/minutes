@@ -185,6 +185,7 @@ pub mod policy_fs;
 pub mod process_trace;
 pub mod resummarize;
 pub mod retention;
+pub mod sidecar_audio;
 // Shared mono-downmix + decimation resampler (used by capture and streaming)
 pub(crate) mod resample;
 pub mod screen;

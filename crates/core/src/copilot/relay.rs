@@ -17,7 +17,7 @@ use interprocess::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -566,7 +566,7 @@ pub struct CaptureRelayClient {
     discovery_path: PathBuf,
     discovery: CaptureRelayDiscovery,
     reader: BufReader<Stream>,
-    pending_line: String,
+    pending_line: Vec<u8>,
     cursor: RelayCursor,
     // The attach acknowledgement is internal. Establishment completes only
     // after a frame has been delivered to the caller through `try_recv`.
@@ -671,6 +671,7 @@ impl CaptureRelayClient {
         )?;
         let mut reader = BufReader::new(stream);
         let first = read_frame_blocking(&mut reader)?;
+        let reset_cursor = matches!(&first, RelayFrame::CursorReset { .. });
         match first {
             RelayFrame::Attached { .. } | RelayFrame::CursorReset { .. } => {}
             RelayFrame::Error { message } if message.contains("authentication") => {
@@ -692,10 +693,15 @@ impl CaptureRelayClient {
             discovery_path: discovery_path.to_path_buf(),
             discovery: discovery.clone(),
             reader,
-            pending_line: String::new(),
+            pending_line: Vec::new(),
             cursor: RelayCursor {
                 session_id: Some(discovery.session_id),
-                ..cursor
+                transcript_seq: if reset_cursor {
+                    0
+                } else {
+                    cursor.transcript_seq
+                },
+                nudge_seq: if reset_cursor { 0 } else { cursor.nudge_seq },
             },
             established: false,
             establishment_retry,
@@ -712,31 +718,49 @@ impl CaptureRelayClient {
 
     pub fn try_recv(&mut self) -> Result<Option<RelayFrame>, CaptureRelayError> {
         loop {
+            if let Some(end) = self.pending_line.iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = self.pending_line.drain(..=end).collect();
+                let frame: RelayFrame = serde_json::from_slice(&line).map_err(|error| {
+                    CaptureRelayError::InvalidData(format!("invalid relay frame: {error}"))
+                })?;
+                self.observe_cursor(&frame);
+                self.established = true;
+                return Ok(Some(frame));
+            }
+            if !self.reader.buffer().is_empty() {
+                let count = self.reader.buffer().len();
+                self.pending_line.extend_from_slice(self.reader.buffer());
+                self.reader.consume(count);
+                continue;
+            }
+            // Read only bytes known to be available on a blocking Windows
+            // pipe. read_line can block on an incomplete JSON frame, and
+            // PeekNamedPipe cannot see bytes already inside BufReader.
+            let mut bytes = [0u8; 8192];
             #[cfg(windows)]
-            match windows_stream_has_data(self.reader.get_ref()) {
-                Ok(false) => return Ok(None),
-                Ok(true) => {}
+            let count = match windows_stream_available(self.reader.get_ref()) {
+                Ok(0) => return Ok(None),
+                Ok(count) => count.min(bytes.len()),
                 Err(error) if !self.established => {
                     self.reconnect_during_establishment(CaptureRelayError::Io(error))?;
                     continue;
                 }
                 Err(error) => return Err(CaptureRelayError::Io(error)),
-            }
-            match self.reader.read_line(&mut self.pending_line) {
+            };
+            #[cfg(not(windows))]
+            let count = bytes.len();
+            match self.reader.get_mut().read(&mut bytes[..count]) {
                 Ok(0) if !self.established => {
                     self.reconnect_during_establishment(connection_closed_error())?;
                 }
                 Ok(0) => return Err(connection_closed_error()),
-                Ok(_) if !self.pending_line.ends_with('\n') => return Ok(None),
-                Ok(_) => {
-                    let line = std::mem::take(&mut self.pending_line);
-                    let frame: RelayFrame =
-                        serde_json::from_str(line.trim_end()).map_err(|error| {
-                            CaptureRelayError::InvalidData(format!("invalid relay frame: {error}"))
-                        })?;
-                    self.observe_cursor(&frame);
-                    self.established = true;
-                    return Ok(Some(frame));
+                Ok(count) => {
+                    self.pending_line.extend_from_slice(&bytes[..count]);
+                    if self.pending_line.len() > 1024 * 1024 {
+                        return Err(CaptureRelayError::InvalidData(
+                            "relay frame exceeds 1 MiB".into(),
+                        ));
+                    }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(None),
                 Err(error) if !self.established && error.kind() == io::ErrorKind::UnexpectedEof => {
@@ -829,7 +853,7 @@ fn connection_closed_error() -> CaptureRelayError {
 }
 
 #[cfg(windows)]
-fn windows_stream_has_data(stream: &Stream) -> io::Result<bool> {
+fn windows_stream_available(stream: &Stream) -> io::Result<usize> {
     use std::os::windows::io::{AsHandle, AsRawHandle};
     use windows_sys::Win32::Foundation::{
         ERROR_BAD_PIPE, ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_NOT_CONNECTED,
@@ -868,7 +892,7 @@ fn windows_stream_has_data(stream: &Stream) -> io::Result<bool> {
             Err(error)
         }
     } else {
-        Ok(available > 0)
+        Ok(available as usize)
     }
 }
 
@@ -1275,8 +1299,10 @@ fn current_transport() -> RelayTransport {
 fn relay_endpoint(dir: &Path, session_id: &str) -> String {
     #[cfg(windows)]
     {
-        let _ = (dir, session_id);
-        r"\\.\pipe\minutes-capture-relay".into()
+        let _ = dir;
+        // Discovery and the owner lock govern a session. A machine-global
+        // name collides with other users and isolated replay/test sessions.
+        format!(r"\\.\pipe\minutes-capture-relay-{session_id}")
     }
     #[cfg(not(windows))]
     {
@@ -1764,6 +1790,82 @@ mod tests {
             assert_eq!(cursor.transcript_seq, seq);
             assert_eq!(cursor.nudge_seq, seq);
         }
+    }
+
+    #[test]
+    fn burst_replay_drains_buffered_frames_before_the_next_heartbeat() {
+        let dir = TempDir::new().unwrap();
+        let server = CaptureRelayServer::start_for_test(dir.path()).unwrap();
+        for seq in 1..=64 {
+            server.publish_transcript_for_test(utterance(&format!("synthetic-{seq}")));
+        }
+        let mut client = CaptureRelayClient::connect_from(
+            &capture_relay_discovery_path_in(dir.path()),
+            RelayCursor::default(),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_millis(350);
+        while client.cursor().transcript_seq < 64 && Instant::now() < deadline {
+            if client.try_recv().unwrap().is_none() {
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+        assert_eq!(
+            client.cursor().transcript_seq,
+            64,
+            "all buffered replay must drain without another server write"
+        );
+    }
+
+    #[test]
+    fn session_change_resets_the_consumed_handshake_cursor() {
+        let dir = TempDir::new().unwrap();
+        let server = CaptureRelayServer::start_for_test(dir.path()).unwrap();
+        server.publish_transcript_for_test(utterance("new session"));
+        let mut client = CaptureRelayClient::connect_from(
+            &capture_relay_discovery_path_in(dir.path()),
+            RelayCursor {
+                session_id: Some("previous-session".into()),
+                transcript_seq: 100,
+                nudge_seq: 100,
+            },
+        )
+        .unwrap();
+        assert_eq!(client.cursor().transcript_seq, 0);
+        wait_for_frame(&mut client, |frame| {
+            matches!(frame, RelayFrame::Transcript { seq: 1, .. })
+        });
+        assert_eq!(client.cursor().transcript_seq, 1);
+        assert_eq!(client.cursor().nudge_seq, 0);
+    }
+
+    #[test]
+    fn fragmented_utf8_frame_is_retained_until_complete() {
+        let dir = TempDir::new().unwrap();
+        let _server = CaptureRelayServer::start_for_test(dir.path()).unwrap();
+        let mut client = CaptureRelayClient::connect_from(
+            &capture_relay_discovery_path_in(dir.path()),
+            RelayCursor::default(),
+        )
+        .unwrap();
+        // Drain the initial heartbeat before injecting a split frame. The
+        // receive buffer stores bytes, so a split UTF-8 codepoint is valid.
+        wait_for_frame(&mut client, |frame| {
+            matches!(frame, RelayFrame::Heartbeat { .. })
+        });
+        let frame = RelayFrame::Transcript {
+            seq: 1,
+            update: utterance("café"),
+        };
+        let mut bytes = serde_json::to_vec(&frame).unwrap();
+        bytes.push(b'\n');
+        let split = bytes.iter().position(|byte| *byte == 0xc3).unwrap() + 1;
+        client.pending_line.extend_from_slice(&bytes[..split]);
+        let started = Instant::now();
+        assert!(client.try_recv().unwrap().is_none());
+        assert!(started.elapsed() < Duration::from_millis(100));
+        client.pending_line.extend_from_slice(&bytes[split..]);
+        assert_eq!(client.try_recv().unwrap(), Some(frame));
     }
 
     /// Retry only the transient reconnect race, and only briefly.

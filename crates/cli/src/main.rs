@@ -18798,6 +18798,7 @@ struct LiveEvidenceSnapshotV1 {
     draft_state: minutes_core::copilot::RelayDraftState,
     capture_relay: Option<TranscriptCaptureRelayProjection>,
     gap: bool,
+    health: minutes_core::live_transcript::SessionStatus,
 }
 
 #[cfg(feature = "whisper")]
@@ -18828,23 +18829,38 @@ fn read_current_speech_replay() -> std::result::Result<
     let mut client = CaptureRelayClient::connect(RelayCursor::default())?;
     let discovery = client.discovery().clone();
     let deadline = Instant::now() + Duration::from_millis(350);
-    let mut quiet_since = Instant::now();
     let mut frames = Vec::<RelayFrame>::new();
-    loop {
+    let mut complete = false;
+    while Instant::now() < deadline {
         match client.try_recv()? {
             Some(frame) => {
+                // The server emits its first heartbeat after replaying the
+                // buffer. Its watermark proves that we consumed that replay.
+                if let RelayFrame::Heartbeat {
+                    transcript_seq,
+                    nudge_seq,
+                    ..
+                } = &frame
+                {
+                    let cursor = client.cursor();
+                    complete =
+                        cursor.transcript_seq >= *transcript_seq && cursor.nudge_seq >= *nudge_seq;
+                }
                 frames.push(frame);
-                quiet_since = Instant::now();
+                if complete {
+                    break;
+                }
             }
-            None if !frames.is_empty() && quiet_since.elapsed() >= Duration::from_millis(40) => {
-                break;
-            }
-            None if Instant::now() >= deadline => break,
             None => std::thread::sleep(Duration::from_millis(5)),
         }
     }
     let cursor = client.cursor();
-    let snapshot = reduce_relay_draft(&frames, discovery.evidence_mode, chrono::Utc::now());
+    let mut snapshot = reduce_relay_draft(&frames, discovery.evidence_mode, chrono::Utc::now());
+    if !complete {
+        snapshot.current_draft = None;
+        snapshot.draft_state = minutes_core::copilot::RelayDraftState::Unavailable;
+        snapshot.gap = true;
+    }
     Ok((
         TranscriptCaptureRelayProjection {
             session_id: discovery.session_id,
@@ -18959,6 +18975,7 @@ fn cmd_transcript(
             draft_state: draft.draft_state,
             capture_relay,
             gap: draft.gap,
+            health: session,
         };
         if format == "json" {
             println!("{}", serde_json::to_string_pretty(&snapshot)?);

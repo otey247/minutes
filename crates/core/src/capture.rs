@@ -870,7 +870,7 @@ fn build_capture_stream(
     stop_flag: &Arc<AtomicBool>,
     sample_count: &Arc<std::sync::atomic::AtomicU64>,
     err_flag: &Arc<AtomicBool>,
-    live_tx: &Option<std::sync::mpsc::SyncSender<Vec<f32>>>,
+    live_tx: &Option<crate::sidecar_audio::SidecarSender>,
 ) -> Result<(cpal::Stream, Arc<crate::resample::InputStreamDiagnostics>), CaptureError> {
     let writer_clone = Arc::clone(writer);
     let sample_count_clone = Arc::clone(sample_count);
@@ -950,7 +950,7 @@ fn try_reconnect(
     stop_flag: &Arc<AtomicBool>,
     sample_count: &Arc<std::sync::atomic::AtomicU64>,
     err_flag: &Arc<AtomicBool>,
-    live_tx: &Option<std::sync::mpsc::SyncSender<Vec<f32>>>,
+    live_tx: &Option<crate::sidecar_audio::SidecarSender>,
 ) -> Option<(
     cpal::Stream,
     String,
@@ -1044,7 +1044,7 @@ impl DualCaptureWriters {
         &mut self,
         voice_samples: &[f32],
         system_samples: &[f32],
-        live_tx: &Option<std::sync::mpsc::SyncSender<Vec<f32>>>,
+        live_tx: &Option<crate::sidecar_audio::SidecarSender>,
     ) -> Result<(), CaptureError> {
         write_samples_to_wav(&mut self.voice, voice_samples, &mut self.voice_content)?;
         write_samples_to_wav(&mut self.system, system_samples, &mut self.system_content)?;
@@ -1307,7 +1307,7 @@ fn flush_dual_source_slots(
     pending_voice: &mut std::collections::BTreeMap<u64, Vec<f32>>,
     pending_system: &mut std::collections::BTreeMap<u64, Vec<f32>>,
     writers: &mut DualCaptureWriters,
-    live_tx: &Option<std::sync::mpsc::SyncSender<Vec<f32>>>,
+    live_tx: &Option<crate::sidecar_audio::SidecarSender>,
     slot_stats: &mut DualSlotStats,
 ) -> Result<(), CaptureError> {
     let (Some(current_slot), Some(max_slot)) = (*next_slot, max_slot) else {
@@ -2242,10 +2242,10 @@ pub(crate) fn start_live_sidecar(
     stop_flag: &Arc<AtomicBool>,
     partial_publisher: Option<crate::live_partials::LivePartialPublisher>,
 ) -> (
-    Option<std::sync::mpsc::SyncSender<Vec<f32>>>,
+    Option<crate::sidecar_audio::SidecarSender>,
     Option<std::thread::JoinHandle<()>>,
 ) {
-    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(200);
+    let (tx, rx) = crate::sidecar_audio::channel(200);
     let sidecar_config = config.clone();
     let sidecar_stop = stop_flag.clone();
     match std::thread::Builder::new()
@@ -2272,7 +2272,7 @@ pub(crate) fn start_live_sidecar(
     _stop_flag: &Arc<AtomicBool>,
     _partial_publisher: Option<crate::live_partials::LivePartialPublisher>,
 ) -> (
-    Option<std::sync::mpsc::SyncSender<Vec<f32>>>,
+    Option<crate::sidecar_audio::SidecarSender>,
     Option<std::thread::JoinHandle<()>>,
 ) {
     (None, None)

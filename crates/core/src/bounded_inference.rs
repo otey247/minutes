@@ -28,16 +28,20 @@ pub(crate) fn try_send_drop_newest<T>(
     item: T,
     counters: &QueueCounters,
 ) -> EnqueueResult {
+    // Reserve before publication: a fast consumer may finish before try_send
+    // returns. Incrementing afterwards lets its decrement wrap below zero.
+    counters.pending.fetch_add(1, Ordering::Relaxed);
     match tx.try_send(item) {
-        Ok(()) => {
-            counters.pending.fetch_add(1, Ordering::Relaxed);
-            EnqueueResult::Queued
-        }
+        Ok(()) => EnqueueResult::Queued,
         Err(TrySendError::Full(_)) => {
+            counters.pending.fetch_sub(1, Ordering::Relaxed);
             counters.dropped.fetch_add(1, Ordering::Relaxed);
             EnqueueResult::DroppedFull
         }
-        Err(TrySendError::Disconnected(_)) => EnqueueResult::Disconnected,
+        Err(TrySendError::Disconnected(_)) => {
+            counters.pending.fetch_sub(1, Ordering::Relaxed);
+            EnqueueResult::Disconnected
+        }
     }
 }
 
@@ -46,6 +50,28 @@ mod tests {
     use super::*;
     use std::sync::{mpsc, Arc, Barrier};
     use std::time::Duration;
+
+    #[test]
+    fn fast_worker_never_decrements_an_unpublished_reservation() {
+        let (tx, rx) = mpsc::sync_channel::<u8>(3);
+        let counters = Arc::new(QueueCounters::default());
+        let worker_counters = Arc::clone(&counters);
+        let worker = std::thread::spawn(move || {
+            while rx.recv().is_ok() {
+                let previous = worker_counters.pending.fetch_sub(1, Ordering::Relaxed);
+                assert!(
+                    previous > 0 && previous < 10,
+                    "pending underflowed: {previous}"
+                );
+            }
+        });
+        for _ in 0..10_000 {
+            try_send_drop_newest(&tx, 1, &counters);
+        }
+        drop(tx);
+        worker.join().unwrap();
+        assert_eq!(counters.pending.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn blocked_inference_worker_does_not_starve_capture_and_queue_stays_bounded() {

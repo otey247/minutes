@@ -392,13 +392,11 @@ fn run_one_engine(
     live_jsonl: &Path,
     dest: &Path,
 ) -> Result<EngineRun, Box<dyn std::error::Error>> {
-    use std::sync::mpsc;
-
     // The sidecar writer overwrites this file each run; remove
     // any leftover so we are sure we capture only this run's output.
     let _ = std::fs::remove_file(live_jsonl);
 
-    let (tx, rx) = mpsc::channel::<Vec<f32>>();
+    let (tx, rx) = minutes_core::sidecar_audio::channel(200);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_clone = Arc::clone(&stop_flag);
 

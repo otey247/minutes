@@ -307,7 +307,7 @@ pub fn spawn_live_transcription_from_stems(
 fn feed_from_stems(
     voice_stem: PathBuf,
     system_stem: Option<PathBuf>,
-    live_tx: &std::sync::mpsc::SyncSender<Vec<f32>>,
+    live_tx: &crate::sidecar_audio::SidecarSender,
     stop_flag: &Arc<AtomicBool>,
 ) {
     let Some((mut voice, mut system)) = wait_for_stems(

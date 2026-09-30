@@ -46,6 +46,26 @@ use whisper_rs::WhisperContext;
 /// Whisper passes that returned an error since the last reset. Read by the
 /// recording sidecar's session summary; reset when a sidecar starts.
 static WHISPER_FAILURES: AtomicU64 = AtomicU64::new(0);
+static WHISPER_EMPTY: AtomicU64 = AtomicU64::new(0);
+static WHISPER_CANCELED: AtomicU64 = AtomicU64::new(0);
+static WHISPER_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RecognitionStats {
+    pub attempts: u64,
+    pub empty_results: u64,
+    pub failures: u64,
+    pub cancellations: u64,
+}
+
+pub(crate) fn recognition_stats() -> RecognitionStats {
+    RecognitionStats {
+        attempts: WHISPER_ATTEMPTS.load(Ordering::Relaxed),
+        empty_results: WHISPER_EMPTY.load(Ordering::Relaxed),
+        failures: failure_count(),
+        cancellations: WHISPER_CANCELED.load(Ordering::Relaxed),
+    }
+}
 
 pub(crate) fn failure_count() -> u64 {
     WHISPER_FAILURES.load(Ordering::Relaxed)
@@ -53,6 +73,9 @@ pub(crate) fn failure_count() -> u64 {
 
 pub(crate) fn reset_failure_count() {
     WHISPER_FAILURES.store(0, Ordering::Relaxed);
+    WHISPER_EMPTY.store(0, Ordering::Relaxed);
+    WHISPER_CANCELED.store(0, Ordering::Relaxed);
+    WHISPER_ATTEMPTS.store(0, Ordering::Relaxed);
 }
 
 /// How often to run partial transcription (in audio samples at 16kHz).
@@ -100,6 +123,7 @@ pub struct StreamingWhisper {
     /// in-flight Whisper pass so optional live evidence cannot hold capture
     /// shutdown open after the WAV has been sealed.
     abort_signal: Option<Arc<AtomicBool>>,
+    work_abort_signal: Option<Arc<AtomicBool>>,
 }
 
 impl StreamingWhisper {
@@ -131,6 +155,7 @@ impl StreamingWhisper {
             has_created_state: false,
             partial_max_samples,
             abort_signal: None,
+            work_abort_signal: None,
         }
     }
 
@@ -142,6 +167,26 @@ impl StreamingWhisper {
     pub fn with_abort_signal(mut self, abort_signal: Arc<AtomicBool>) -> Self {
         self.abort_signal = Some(abort_signal);
         self
+    }
+
+    pub(crate) fn with_work_abort_signal(mut self, signal: Arc<AtomicBool>) -> Self {
+        self.work_abort_signal = Some(signal);
+        self
+    }
+
+    /// Recognize an already segmented buffer once, without progressive passes.
+    /// Silence padding permits speech-confirmed short replies; duration remains
+    /// the duration of the source, not the padded inference input.
+    pub(crate) fn transcribe_once(
+        &mut self,
+        samples: &[f32],
+        ctx: &WhisperContext,
+    ) -> Option<StreamingResult> {
+        recognize_once(samples, |audio| {
+            self.audio_buffer.clear();
+            self.audio_buffer.extend_from_slice(audio);
+            self.transcribe(ctx, true)
+        })
     }
 
     /// Feed audio samples. Returns a partial result if enough audio has
@@ -215,12 +260,16 @@ impl StreamingWhisper {
         // Stack-owned so it outlives `state.full`; whisper-rs's closure
         // setter is unsound for capturing closures (see `set_abort_callback`).
         let abort_signal = self.abort_signal.clone();
+        let work_abort_signal = self.work_abort_signal.clone();
         let abort_when_stopped = move || {
             abort_signal
                 .as_ref()
                 .is_some_and(|signal| signal.load(Ordering::Relaxed))
+                || work_abort_signal
+                    .as_ref()
+                    .is_some_and(|signal| signal.load(Ordering::Relaxed))
         };
-        if self.abort_signal.is_some() {
+        if self.abort_signal.is_some() || self.work_abort_signal.is_some() {
             set_abort_callback(&mut params, &abort_when_stopped);
         }
 
@@ -228,7 +277,12 @@ impl StreamingWhisper {
 
         let window_start = self.transcription_window_start(is_final);
         let transcription_audio = &self.audio_buffer[window_start..];
+        WHISPER_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         if let Err(e) = state.full(params, transcription_audio) {
+            if abort_when_stopped() {
+                WHISPER_CANCELED.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
             tracing::warn!("streaming whisper failed: {}", e);
             // The desktop app has no tracing subscriber; persist a bounded
             // trail so a whisper pass that fails on every utterance is
@@ -277,6 +331,7 @@ impl StreamingWhisper {
 
         // Skip if empty or identical to last partial (no new info)
         if text.is_empty() {
+            WHISPER_EMPTY.fetch_add(1, Ordering::Relaxed);
             return None;
         }
         if !is_final && text == self.last_partial {
@@ -299,6 +354,26 @@ impl StreamingWhisper {
             duration_secs,
         })
     }
+}
+
+fn recognize_once(
+    samples: &[f32],
+    mut recognize: impl FnMut(&[f32]) -> Option<StreamingResult>,
+) -> Option<StreamingResult> {
+    if samples.is_empty() {
+        return None;
+    }
+    let mut padded;
+    let audio = if samples.len() < MIN_TRANSCRIBE_SAMPLES {
+        padded = samples.to_vec();
+        padded.resize(MIN_TRANSCRIBE_SAMPLES, 0.0);
+        padded.as_slice()
+    } else {
+        samples
+    };
+    let mut result = recognize(audio)?;
+    result.duration_secs = samples.len() as f64 / 16_000.0;
+    Some(result)
 }
 
 /// Temporarily suppress stderr (whisper C code prints noisy init logs).
@@ -332,6 +407,31 @@ fn num_cpus() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidecar_recognizes_once_including_short_replies() {
+        for count in [4_800, 16_000, 128_000, 480_000] {
+            let samples = vec![0.25; count];
+            let mut calls = 0;
+            let result = recognize_once(&samples, |input| {
+                calls += 1;
+                assert_eq!(&input[..count], samples.as_slice());
+                assert_eq!(input.len(), count.max(16_000));
+                assert!(input[count..].iter().all(|sample| *sample == 0.0));
+                Some(StreamingResult {
+                    text: "yes".into(),
+                    is_final: true,
+                    duration_secs: 0.0,
+                })
+            })
+            .unwrap();
+            assert_eq!(calls, 1);
+            assert_eq!(result.duration_secs, count as f64 / 16_000.0);
+        }
+        assert!(
+            recognize_once(&[], |_| panic!("empty audio must not invoke recognition")).is_none()
+        );
+    }
 
     #[test]
     fn new_streaming_whisper_has_empty_buffer() {
