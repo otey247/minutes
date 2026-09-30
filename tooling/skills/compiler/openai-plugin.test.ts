@@ -1,0 +1,54 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { discoverCanonicalSkills } from "./discover.js";
+import { renderOpenAIPlugin, OPENAI_SKILLS, OPENAI_PLUGIN_ROOT } from "./openai-plugin.js";
+import { findUnownedGeneratedArtifacts } from "./ownership.js";
+
+const root = fileURLToPath(new URL("../../", import.meta.url));
+
+test("packaged skills resolve installed helpers without depending on a checkout", async () => {
+  const skills = await discoverCanonicalSkills(root);
+  const artifacts = await renderOpenAIPlugin(root, skills);
+  for (const name of OPENAI_SKILLS) {
+    const body = artifacts.get(`${OPENAI_PLUGIN_ROOT}/skills/${name}/SKILL.md`)!;
+    assert.ok(body.startsWith(`---\nname: ${name}\n`));
+    assert.ok(!body.includes("git rev-parse"));
+    assert.ok(!body.includes("${CLAUDE_PLUGIN_ROOT}"));
+    assert.ok(!body.includes(".agents/skills/minutes"));
+    if (body.includes("$MINUTES_SKILLS_ROOT")) assert.ok(body.includes("installed SKILL.md"));
+  }
+});
+
+test("local marketplace stays contained and pins the published MCP package", async () => {
+  const artifacts = await renderOpenAIPlugin(root, await discoverCanonicalSkills(root));
+  const marketplace = JSON.parse(artifacts.get(".agents/plugins/marketplace.json")!);
+  const plugin = JSON.parse(artifacts.get(`${OPENAI_PLUGIN_ROOT}/plugin.json`)!);
+  const mcp = JSON.parse(artifacts.get(`${OPENAI_PLUGIN_ROOT}/mcp.json`)!);
+  assert.equal(marketplace.plugins[0].name, plugin.name);
+  assert.equal(marketplace.plugins[0].source.path, `./${OPENAI_PLUGIN_ROOT}`);
+  assert.equal(mcp.mcpServers.minutes.type, "stdio");
+  assert.deepEqual(mcp.mcpServers.minutes.args, ["-y", "minutes-mcp@0.27.0"]);
+  assert.ok([...artifacts.keys()].every(target => !path.isAbsolute(target) && !target.split("/").includes("..")));
+  const runtime = artifacts.get(`${OPENAI_PLUGIN_ROOT}/skills/_runtime/hooks/lib/minutes-learn.mjs`);
+  assert.ok(runtime?.includes("export"));
+});
+
+test("retired or stray plugin skills cannot survive the ownership check", async t => {
+  const repo = await mkdtemp(path.join(tmpdir(), "minutes-plugin-ownership-"));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  const skills = await discoverCanonicalSkills(root);
+  const artifacts = await renderOpenAIPlugin(root, skills);
+  for (const [target, content] of artifacts) {
+    await mkdir(path.dirname(path.join(repo, target)), { recursive: true });
+    await writeFile(path.join(repo, target), content);
+  }
+  assert.deepEqual(await findUnownedGeneratedArtifacts(repo, skills, artifacts.keys()), []);
+  const unexpected = `${OPENAI_PLUGIN_ROOT}/skills/obsolete/SKILL.md`;
+  await mkdir(path.dirname(path.join(repo, unexpected)), { recursive: true });
+  await writeFile(path.join(repo, unexpected), "obsolete");
+  assert.ok((await findUnownedGeneratedArtifacts(repo, skills, artifacts.keys())).includes(unexpected));
+});

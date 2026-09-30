@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "minutes",
+  "version": "0.1.0",
+  "description": "Conversation memory you own. Prepare, find decisions, and draft follow-ups from authorized local Minutes records.",
+  "author": {
+    "name": "Mat Silverstein",
+    "url": "https://github.com/silverstein"
+  },
+  "homepage": "https://useminutes.app",
+  "repository": "https://github.com/silverstein/minutes",
+  "license": "MIT",
+  "keywords": [
+    "meetings",
+    "conversation-memory",
+    "local-first",
+    "minutes"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Minutes",
+        "shortDescription": "Your conversations. Your memory. Ready for the AI you use."
+      }
+    }
+  }
+}
