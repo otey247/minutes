@@ -39,7 +39,8 @@ npm run qualify
 MINUTES_QUALIFICATION_BIN=/absolute/path/to/minutes-v0.27.0 npm run qualify
 ```
 
-The same demo has a [60-second walkthrough](demo.md) and a
+The same demo has a [60-second walkthrough](demo.md), a
+[sample-only launch kit and try-it flow](launch.md), and a
 [local illustrated preview](demo.html). The preview is explicitly a prepared
 sample answer; it is not a recording of live model output.
 
@@ -56,9 +57,11 @@ npm run compile:dry
 npm run golden
 ```
 
-The package is a local distribution prototype. OpenAI's public plugin
-submission currently requires a remote HTTPS MCP endpoint; the local stdio
-manifest does not establish ChatGPT directory eligibility. A hosted endpoint
+The package is a local distribution prototype. For this MCP-backed package,
+OpenAI's public plugin submission requires a remote HTTPS MCP endpoint; the
+local stdio manifest does not establish ChatGPT directory eligibility. OpenAI
+also accepts skills-only packages, a distinct path requiring independent utility;
+adding MCP to an existing skills-only submission is not currently supported. A hosted endpoint
 would need explicit per-user authorization and preserve restricted-meeting
 policy before publication. Current receipts are in
 [qualification.md](qualification.md).

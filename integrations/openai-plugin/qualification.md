@@ -24,7 +24,7 @@ and live qualification. The dirty canonical checkout was preserved.
 | Callback rendering | Synthetic browser check verified the CSP-authorized URL replacement; Mat's second-account success screenshot also shows live `/auth/connected` without query parameters. |
 | Refresh / logout | Not yet live-qualified. The token's reported earliest refresh point is later than this initial sample test; credentials are preserved. No premature refresh, revocation, or local logout was performed. |
 | Attention asset | Prepared sample illustration and 60-second walkthrough. Browser rendering, both source disclosures, source link destinations and mobile width checked with agent-browser. The illustration explicitly labels its answer as prepared. No public posting or attention result. |
-| Native desktop / public directory | Neither is activated by this tranche. A public submission needs a remote HTTPS MCP endpoint and acceptance; the local package does not meet that distribution gate. |
+| Native desktop / public directory | Neither is activated by this tranche. This MCP-backed package needs a remote HTTPS endpoint and acceptance for directory submission; the local package does not meet that gate. Skills-only submissions are a separate supported format. |
 
 The separate browser-qualification copy is
 `/Users/silverbook/Sites/minutes-openai-qualification.4FCLga`; its credentials
