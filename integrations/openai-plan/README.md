@@ -48,6 +48,11 @@ Model discovery comes from the account's catalog. Requests use `store:false`
 and `stream:true`; an answer is shown only after `response.completed`. A late
 quota failure or an interrupted stream is an error. There are no automatic
 retries, provider substitutions, hosted tools, recording or transcription calls.
+The live endpoint can omit `Content-Type`; the client still requires valid SSE
+frames and explicit completion when that header is absent. An incompatible
+declared MIME type is rejected. After verified sign-in, the success page replaces
+the callback URL with `/auth/connected`, removing authorization parameters from
+the visible URL and that history entry.
 Logout attempts renewable-session revocation and always clears local tokens;
 the CLI reports explicitly if remote revocation was not confirmed.
 
@@ -63,6 +68,11 @@ The tests use synthetic tokens and transport responses. They verify protocol
 boundaries, storage permissions, refresh rotation, cancellation and incomplete
 streams. Passing them does not prove account eligibility or a live response.
 Current evidence is in [qualification.md](../openai-plugin/qualification.md).
+The September 30 live test verified sign-in, persisted-session reuse and model
+discovery. Sample inference returned a usage-limit error; there is no completed
+live demo answer. Further plan-inference calls stopped and the connection remains
+available for a later qualified attempt. Do not replace that failure with a
+different model, provider or an API key and call it the same live result.
 
 Sources checked September 30, 2026:
 

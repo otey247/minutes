@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { generateKeyPair, SignJWT } from 'jose';
-import { ISSUER, RESOURCE, SCOPES, PLAN_SCOPE, newAttempt, authorizationUrl, validateCallback, validateIdentity, credentialRecord, jsonRequest, refresh, revoke, login } from '../oauth.mjs';
+import { ISSUER, RESOURCE, SCOPES, PLAN_SCOPE, newAttempt, authorizationUrl, validateCallback, validateIdentity, credentialRecord, jsonRequest, refresh, revoke, login, signInSuccessPage } from '../oauth.mjs';
 import { demoRequest, completedText, models, runDemo } from '../inference.mjs';
 
 const host = 'urn:uuid:00000000-0000-4000-8000-000000000000';
@@ -144,6 +145,30 @@ test('demo sends supported parameters and labelled evidence rather than hosted t
 test('completed stream returns the terminal answer, even when deltas differ', async () => {
   const result = await completedText(stream([{ type: 'response.output_text.delta', delta: 'unfinished' }, completed]));
   assert.equal(result.text, 'A cited sample answer.'); assert.equal(result.response_id, 'resp_test');
+});
+
+test('a missing MIME header still requires valid SSE and confirmed completion', async () => {
+  const noHeader = events => new Response(new ReadableStream({ start(controller) {
+    controller.enqueue(new TextEncoder().encode(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('')));
+    controller.close();
+  } }));
+  assert.equal(noHeader([completed]).headers.get('content-type'), null);
+  assert.equal((await completedText(noHeader([completed]))).response_id, 'resp_test');
+  await assert.rejects(completedText(noHeader([{ type: 'response.output_text.delta', delta: 'unfinished' }])), /without response.completed/);
+  await assert.rejects(completedText(noHeader([{ type: 'response.failed', response: { error: { code: 'subscription_sharing_usage_limit_exceeded' } } }])), /subscription_sharing_usage_limit_exceeded/);
+  const wrongHeader = stream([completed]); wrongHeader.headers.set('content-type', 'application/json');
+  await assert.rejects(completedText(wrongHeader), /Expected a Responses event stream/);
+  const json = new Response(new TextEncoder().encode(JSON.stringify(completed)));
+  await assert.rejects(completedText(json), /without response.completed/);
+});
+
+test('success page removes callback parameters using only its CSP-authorized script', () => {
+  const page = signInSuccessPage();
+  const script = page.html.match(/<script>(.*?)<\/script>/)[1];
+  assert.equal(script, "history.replaceState(null, '', '/auth/connected');");
+  assert.ok(page.csp.includes(`'sha256-${createHash('sha256').update(script).digest('base64')}'`));
+  assert.equal(page.contentType, 'text/html; charset=utf-8');
+  assert.ok(!page.html.includes('access_token'));
 });
 
 test('quota failures after output begins are failures, not completed answers', async () => {

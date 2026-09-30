@@ -10,6 +10,16 @@ const TOKEN_ENDPOINT = `${ISSUER}/api/accounts/oauth/token`;
 const keys = createRemoteJWKSet(new URL(`${ISSUER}/.well-known/jwks.json`));
 const random = () => randomBytes(32).toString('base64url');
 const safeCode = value => typeof value === 'string' && /^[a-zA-Z0-9_.-]{1,100}$/.test(value) ? value : 'unknown';
+const CLEAN_CALLBACK_SCRIPT = "history.replaceState(null, '', '/auth/connected');";
+
+export function signInSuccessPage() {
+  const hash = createHash('sha256').update(CLEAN_CALLBACK_SCRIPT).digest('base64');
+  return {
+    contentType: 'text/html; charset=utf-8',
+    csp: `default-src 'none'; script-src 'sha256-${hash}'; base-uri 'none'; frame-ancestors 'none'`,
+    html: `<!doctype html><html lang="en"><meta charset="utf-8"><title>Minutes connected</title><script>${CLEAN_CALLBACK_SCRIPT}</script><h1>Minutes connected</h1><p>Sign-in verified. Return to the Minutes prototype terminal.</p></html>`,
+  };
+}
 
 export class ProviderError extends Error {
   constructor(stage, status, code, requestId = null, shape = 'unknown') {
@@ -144,7 +154,10 @@ export async function login(hostId, account, { onReady = () => {}, signal, port 
     consumed = true;
     try {
       const record = await exchange(callback, attempt, fetch, signal);
-      response.end('Sign-in verified. Return to the Minutes prototype terminal.');
+      const page = signInSuccessPage();
+      response.setHeader('Content-Type', page.contentType);
+      response.setHeader('Content-Security-Policy', page.csp);
+      response.end(page.html);
       finish.resolve(record);
     } catch (error) { response.writeHead(400).end('Sign-in could not be verified. Return to the terminal.'); finish.reject(error); }
   });

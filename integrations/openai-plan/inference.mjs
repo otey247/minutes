@@ -28,7 +28,11 @@ export async function completedText(response) {
     let data = {}; try { data = await response.json(); } catch {}
     throw new ProviderError('Inference', response.status, data.error?.code, response.headers.get('x-request-id'), data.detail ? 'detail' : data.error ? 'error' : 'other');
   }
-  if (!response.headers.get('content-type')?.includes('text/event-stream') || !response.body) throw new Error('Expected a Responses event stream.');
+  const contentType = response.headers.get('content-type');
+  // The live plan endpoint can omit Content-Type. A missing header does not
+  // establish completion: the bounded parser below still requires valid SSE
+  // and an explicit response.completed event. Reject an incompatible header.
+  if ((contentType && !contentType.includes('text/event-stream')) || !response.body) throw new Error('Expected a Responses event stream.');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let pending = '', total = 0;
