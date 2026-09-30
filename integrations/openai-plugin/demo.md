@@ -16,7 +16,10 @@ The evidence supports this answer: monthly billing was approved as a narrow
 experiment on February 28. On March 25 it was reversed to annual-only after
 four signups fell below the threshold of twelve and churn looked worse. The
 February decision did not remain current. This is an expected answer for review,
-not a claimed live model result.
+not itself a live model result. The separately preserved
+[actual September 30 model answer](live-sample-answer-2026-09-30.md) now confirms
+this behavior on the user-selected second account. It has been manually checked
+against both source records; refresh and logout remain separate qualification gates.
 
 If recording with the ChatGPT-plan prototype, show the consent screen and model
 choice only after live qualification. Keep tokens, callback query strings,

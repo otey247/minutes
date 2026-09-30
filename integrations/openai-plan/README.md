@@ -50,7 +50,11 @@ quota failure or an interrupted stream is an error. There are no automatic
 retries, provider substitutions, hosted tools, recording or transcription calls.
 The live endpoint can omit `Content-Type`; the client still requires valid SSE
 frames and explicit completion when that header is absent. An incompatible
-declared MIME type is rejected. After verified sign-in, the success page replaces
+declared MIME type is rejected. If the terminal output list is empty, the client
+uses completed assistant messages from `response.output_item.done`, in output
+order. Deltas alone cannot establish an answer; failed or incomplete responses
+still discard all buffered output. Populated terminal output is authoritative.
+After verified sign-in, the success page replaces
 the callback URL with `/auth/connected`, removing authorization parameters from
 the visible URL and that history entry.
 Logout attempts renewable-session revocation and always clears local tokens;
@@ -68,11 +72,15 @@ The tests use synthetic tokens and transport responses. They verify protocol
 boundaries, storage permissions, refresh rotation, cancellation and incomplete
 streams. Passing them does not prove account eligibility or a live response.
 Current evidence is in [qualification.md](../openai-plugin/qualification.md).
-The September 30 live test verified sign-in, persisted-session reuse and model
-discovery. Sample inference returned a usage-limit error; there is no completed
-live demo answer. Further plan-inference calls stopped and the connection remains
-available for a later qualified attempt. Do not replace that failure with a
-different model, provider or an API key and call it the same live result.
+The September 30 live tests verified sign-in, persisted-session reuse and model
+discovery. The first account returned a usage-limit error, preserved in its own
+receipt. At the user's explicit choice, a second account completed the same
+GPT-6-Astra sample after the parser fix. The answer cites both dated source files,
+correctly identifies the reversal and does not claim an open task was completed.
+The separate [second-account receipt](../openai-plugin/live-qualification-second-account-2026-09-30.json)
+and [actual answer](../openai-plugin/live-sample-answer-2026-09-30.md) preserve that
+success without relabeling the first account's quota failure. Both connections
+remain stored. Near-expiry refresh and logout/revocation remain unqualified.
 
 Sources checked September 30, 2026:
 

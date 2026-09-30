@@ -147,6 +147,40 @@ test('completed stream returns the terminal answer, even when deltas differ', as
   assert.equal(result.text, 'A cited sample answer.'); assert.equal(result.response_id, 'resp_test');
 });
 
+const finishedMessage = (index, text) => ({ type: 'response.output_item.done', output_index: index,
+  item: { id: `msg_${index}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text }] } });
+const emptyCompleted = { ...completed, response: { ...completed.response, output: [] } };
+
+test('empty terminal output uses finished assistant messages in output order', async () => {
+  const result = await completedText(stream([finishedMessage(1, 'Second.'), finishedMessage(0, 'First.'), emptyCompleted]));
+  assert.equal(result.text, 'First.\nSecond.');
+  assert.equal(result.response_id, 'resp_test');
+  assert.equal((await completedText(stream([finishedMessage(0, 'Earlier.'), completed]))).text, 'A cited sample answer.');
+});
+
+test('finished messages do not establish response completion', async () => {
+  await assert.rejects(completedText(stream([finishedMessage(0, 'Finished item only.')])), /without response.completed/);
+  for (const type of ['response.failed', 'response.incomplete']) {
+    await assert.rejects(completedText(stream([finishedMessage(0, 'Discard me.'), { type, response: { error: { code: 'test_failure' } } }, emptyCompleted])), /test_failure/);
+  }
+  await assert.rejects(completedText(stream([{ type: 'response.output_text.delta', delta: 'Partial.' }, emptyCompleted])), /contained no answer/);
+  await assert.rejects(completedText(stream([{ ...emptyCompleted, response: { ...emptyCompleted.response, status: 'incomplete' } }])), /did not confirm completion/);
+});
+
+test('finished-message fallback excludes other roles and rejects ambiguous or unfinished items', async () => {
+  const message = finishedMessage(0, 'Answer.');
+  await assert.rejects(completedText(stream([{ ...message, item: { ...message.item, role: 'user' } }, emptyCompleted])), /contained no answer/);
+  for (const invalid of [
+    { ...message, output_index: -1 },
+    { ...message, item: { ...message.item, status: 'in_progress' } },
+    { ...message, item: { ...message.item, id: '' } },
+  ]) await assert.rejects(completedText(stream([invalid, emptyCompleted])), /Invalid or duplicate/);
+  await assert.rejects(completedText(stream([message, message, emptyCompleted])), /Invalid or duplicate/);
+  await assert.rejects(completedText(stream([message, { ...message, output_index: 1 }, emptyCompleted])), /Invalid or duplicate/);
+  const toolOnly = { ...completed, response: { ...completed.response, output: [{ type: 'function_call' }] } };
+  await assert.rejects(completedText(stream([message, toolOnly])), /contained no answer/);
+});
+
 test('a missing MIME header still requires valid SSE and confirmed completion', async () => {
   const noHeader = events => new Response(new ReadableStream({ start(controller) {
     controller.enqueue(new TextEncoder().encode(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('')));

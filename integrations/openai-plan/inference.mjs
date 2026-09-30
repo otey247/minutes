@@ -35,6 +35,7 @@ export async function completedText(response) {
   if ((contentType && !contentType.includes('text/event-stream')) || !response.body) throw new Error('Expected a Responses event stream.');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  const finishedMessages = new Map();
   let pending = '', total = 0;
   try {
     while (true) {
@@ -52,10 +53,35 @@ export async function completedText(response) {
         if (['response.failed', 'response.incomplete', 'error'].includes(event.type)) {
           throw new ProviderError('Inference stream', response.status, event.response?.error?.code ?? event.error?.code ?? event.code ?? event.type, response.headers.get('x-request-id'));
         }
+        if (event.type === 'response.output_item.done' && event.item?.type === 'message' && event.item.role === 'assistant') {
+          if (!Number.isSafeInteger(event.output_index) || event.output_index < 0 ||
+              typeof event.item.id !== 'string' || !event.item.id || event.item.status !== 'completed' ||
+              !Array.isArray(event.item.content) || finishedMessages.has(event.output_index) ||
+              [...finishedMessages.values()].some(item => item.id === event.item.id)) {
+            throw new Error('Invalid or duplicate finished assistant message.');
+          }
+          finishedMessages.set(event.output_index, event.item);
+        }
         if (event.type === 'response.completed') {
           if (event.response?.status !== 'completed') throw new Error('Terminal response did not confirm completion.');
-          const text = (event.response.output ?? []).filter(item => item.type === 'message' && item.role === 'assistant').flatMap(item => item.content ?? []).filter(item => item.type === 'output_text').map(item => item.text).join('\n');
-          if (!text) throw new Error('Completed response contained no answer.');
+          if (!Array.isArray(event.response.output)) throw new Error('Terminal response has invalid output.');
+          // The live plan endpoint can finish messages in output_item.done and
+          // send an empty terminal output list. Keep only completed messages,
+          // never deltas, and release them only after response.completed. A
+          // populated terminal output remains authoritative.
+          const output = event.response.output.length ? event.response.output :
+            [...finishedMessages.entries()].sort(([a], [b]) => a - b).map(([, item]) => item);
+          const text = output.filter(item => item.type === 'message' && item.role === 'assistant').flatMap(item => item.content ?? []).filter(item => item.type === 'output_text' && typeof item.text === 'string').map(item => item.text).join('\n');
+          if (!text) {
+            const error = new Error('Completed response contained no answer.');
+            error.diagnostics = {
+              response_id: event.response.id ?? null, status: event.response.status,
+              response_fields: Object.keys(event.response),
+              output_shape: (event.response.output ?? []).map(item => ({ type: item.type ?? null, role: item.role ?? null,
+                content: (item.content ?? []).map(part => ({ type: part.type ?? null, text_type: typeof part.text })) })),
+            };
+            throw error;
+          }
           return { text, response_id: event.response.id, usage: event.response.usage ?? null, request_id: response.headers.get('x-request-id') };
         }
       }
