@@ -434,6 +434,8 @@ The zip is the no-install option: unpack it anywhere and run `minutes-app.exe` f
 
 The desktop app adds a system tray icon, recording controls, audio visualizer, Recall, and a meeting list window. The current Windows desktop build covers recording, transcription, search, settings, and Recall. Calendar suggestions, call detection, tray copy/paste automation, and the native dictation hotkey remain macOS-only for now.
 
+To use Coach on Windows, install the [Ollama app](https://ollama.com/download) and open it once. In Minutes, choose **Coach → Set up on-device**, or run `minutes coach setup` from the CLI. Desktop setup also looks in `%LOCALAPPDATA%\Programs\Ollama` when Ollama is not on `PATH`. If setup cannot reach the local model, open Ollama and try again. Coach currently uses Ollama's API; the OpenAI-compatible endpoint configured for Recall does not configure Coach. Coach runs separately from recording, so a model setup failure does not stop audio capture.
+
 Release workflow details live in:
 
 - [macOS release workflow](release/platform-macos.md)

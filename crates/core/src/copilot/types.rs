@@ -357,7 +357,7 @@ impl CopilotSetupNeeded {
     pub fn private_ai() -> Self {
         Self {
             kind: CopilotSetupKind::PrivateAiRequired,
-            message: "Coach needs a small on-device AI model to run privately on your Mac. Setup usually takes about 30 seconds.".into(),
+            message: "Coach needs a small on-device AI model to run privately on your device. Setup usually takes about 30 seconds.".into(),
             action: CopilotSetupAction {
                 kind: CopilotSetupActionKind::RunCommand,
                 label: "Set up Coach's private AI".into(),
@@ -524,6 +524,8 @@ mod tests {
     #[test]
     fn setup_and_status_copy_stays_plain_and_actionable() {
         let setup = CopilotSetupNeeded::private_ai();
+        assert!(setup.message.contains("your device"));
+        assert!(!setup.message.contains("your Mac"));
         let strings = [
             setup.message.as_str(),
             setup.action.label.as_str(),

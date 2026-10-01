@@ -6842,7 +6842,7 @@
                 <input type="radio" name="settings-coach-model" value="on-device" checked>
                 <span class="coach-choice-copy">
                   <span class="coach-choice-title">On-device (private, recommended)</span>
-                  <span class="coach-choice-meta">Meeting speech stays on this Mac.</span>
+                  <span class="coach-choice-meta">Meeting speech stays on this computer.</span>
                 </span>
               </label>
               <label class="coach-choice is-hidden" id="settings-coach-cloud-choice">
@@ -6857,7 +6857,7 @@
 
           <div class="coach-setup-card is-hidden" id="settings-coach-setup" role="status" aria-live="polite">
             <div class="coach-setup-title">One quick setup</div>
-            <div class="coach-setup-copy" id="settings-coach-setup-copy">Coach needs a small on-device AI model to run privately on your Mac.</div>
+            <div class="coach-setup-copy" id="settings-coach-setup-copy">Coach needs a small on-device AI model to run privately on your device.</div>
             <div class="coach-setup-actions">
               <button class="btn btn-primary btn-sm" type="button" data-coach-setup>Set up on-device</button>
               <button class="btn btn-secondary btn-sm is-hidden" type="button" data-coach-use-cloud>Use cloud</button>
@@ -12069,7 +12069,7 @@
       const setupCard = document.getElementById('settings-coach-setup');
       setupCard.classList.toggle('is-hidden', !needsLocalSetup);
       const guidedMessage = settings.guidedSetup?.message ||
-        'Coach needs a small on-device AI model to run privately on your Mac.';
+        'Coach needs a small on-device AI model to run privately on your device.';
       document.getElementById('settings-coach-setup-copy').textContent = guidedMessage;
 
       const onboardingSetup = document.getElementById('coach-onboarding-setup');
@@ -12116,7 +12116,7 @@
       try {
         const settings = await invoke('cmd_setup_coach_model');
         renderCoachSettings(settings);
-        setCoachSetupStatus('Coach is ready on this Mac.');
+        setCoachSetupStatus('Coach is ready on this computer.');
         document.getElementById('settings-coach-save-status').textContent = 'On-device model ready';
       } catch (error) {
         setCoachSetupStatus(String(error || 'Coach setup could not finish. Try again.'), true);

@@ -12885,9 +12885,36 @@ life (qmd://life/)
         assert!(guidance.contains("https://ollama.com/download"));
         assert!(guidance.contains("open it once"));
         assert!(guidance.contains("minutes coach setup"));
+        assert!(guidance.contains("Coach runs on your computer"));
+        assert!(!guidance.contains("your Mac"));
         assert!(!guidance.contains("Homebrew"));
         assert!(!guidance.contains("provider"));
         assert!(!guidance.contains("contract"));
+    }
+
+    #[test]
+    fn windows_ollama_candidates_cover_user_and_machine_installs() {
+        let local = Path::new("local-app-data");
+        let program_files = Path::new("program-files");
+        let program_files_x86 = Path::new("program-files-x86");
+        assert_eq!(
+            windows_ollama_candidates(Some(local), Some(program_files), Some(program_files_x86)),
+            vec![
+                local.join("Programs").join("Ollama").join("ollama.exe"),
+                program_files.join("Ollama").join("ollama.exe"),
+                program_files_x86.join("Ollama").join("ollama.exe"),
+            ]
+        );
+    }
+
+    #[test]
+    fn windows_ollama_candidates_skip_missing_environment_roots() {
+        let program_files = Path::new("program-files");
+        assert_eq!(
+            windows_ollama_candidates(None, Some(program_files), None),
+            vec![program_files.join("Ollama").join("ollama.exe")]
+        );
+        assert!(windows_ollama_candidates(None, None, None).is_empty());
     }
 
     #[test]
@@ -15216,12 +15243,16 @@ fn cmd_copilot_setup(config: &mut Config, forced_model: Option<&str>, retune: bo
         Ok(models) => models,
         Err(error) => {
             tracing::debug!(%error, %base_url, "Coach could not reach the Ollama API");
-            let cli_present = command_is_available("ollama");
+            let ollama_cli = find_ollama_executable();
+            let cli_present = ollama_cli.is_some();
             let brew_present = command_is_available("brew");
             match decide_copilot_setup(false, false, brew_present, cli_present) {
                 CopilotSetupAction::StartOllama => {
+                    let Some(ollama_cli) = ollama_cli.as_deref() else {
+                        anyhow::bail!(ollama_download_guidance());
+                    };
                     eprintln!("Starting Coach's private AI...");
-                    start_ollama(cli_present, brew_present)?;
+                    start_ollama(ollama_cli, brew_present)?;
                 }
                 CopilotSetupAction::InstallWithBrew => {
                     eprintln!("Installing the free private AI Coach uses...");
@@ -15230,11 +15261,11 @@ fn cmd_copilot_setup(config: &mut Config, forced_model: Option<&str>, retune: bo
                         &["install", "ollama"],
                         "Coach could not install Ollama. Download the free app at https://ollama.com/download, open it once, then run `minutes coach setup` again",
                     )?;
-                    if !command_is_available("ollama") {
+                    let Some(ollama_cli) = find_ollama_executable() else {
                         anyhow::bail!(ollama_download_guidance());
-                    }
+                    };
                     eprintln!("Starting Coach's private AI...");
-                    start_ollama(true, true)?;
+                    start_ollama(&ollama_cli, true)?;
                 }
                 CopilotSetupAction::DownloadGuidance => {
                     anyhow::bail!(ollama_download_guidance());
@@ -15762,8 +15793,49 @@ fn command_is_available(program: &str) -> bool {
         .is_ok()
 }
 
-fn start_ollama(cli_present: bool, brew_present: bool) -> Result<()> {
-    if cli_present && brew_present {
+fn find_ollama_executable() -> Option<PathBuf> {
+    if command_is_available("ollama") {
+        return Some(PathBuf::from("ollama"));
+    }
+
+    #[cfg(windows)]
+    {
+        let local_appdata = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+        let program_files = std::env::var_os("ProgramFiles").map(PathBuf::from);
+        let program_files_x86 = std::env::var_os("ProgramFiles(x86)").map(PathBuf::from);
+        windows_ollama_candidates(
+            local_appdata.as_deref(),
+            program_files.as_deref(),
+            program_files_x86.as_deref(),
+        )
+        .into_iter()
+        .find(|path| path.is_file())
+    }
+
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_ollama_candidates(
+    local_appdata: Option<&Path>,
+    program_files: Option<&Path>,
+    program_files_x86: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(root) = local_appdata {
+        candidates.push(root.join("Programs").join("Ollama").join("ollama.exe"));
+    }
+    for root in [program_files, program_files_x86].into_iter().flatten() {
+        candidates.push(root.join("Ollama").join("ollama.exe"));
+    }
+    candidates
+}
+
+fn start_ollama(ollama_cli: &Path, brew_present: bool) -> Result<()> {
+    if brew_present {
         let brew_start = run_copilot_setup_step(
             "brew",
             &["services", "start", "ollama"],
@@ -15775,7 +15847,7 @@ fn start_ollama(cli_present: bool, brew_present: bool) -> Result<()> {
         tracing::debug!("Homebrew could not start Ollama; trying the Ollama app directly");
     }
 
-    std::process::Command::new("ollama")
+    std::process::Command::new(ollama_cli)
         .arg("serve")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -15894,7 +15966,7 @@ fn report_ollama_pull_progress(
 
 fn ollama_download_guidance() -> String {
     format!(
-        "Coach needs the free Ollama app for its private AI. Download it at {OLLAMA_DOWNLOAD_URL}, open it once, then run `minutes coach setup` again. Coach runs on your Mac, and nothing leaves your machine."
+        "Coach needs the free Ollama app for its private AI. Download it at {OLLAMA_DOWNLOAD_URL}, open it once, then run `minutes coach setup` again. Coach runs on your computer, and nothing leaves your machine."
     )
 }
 

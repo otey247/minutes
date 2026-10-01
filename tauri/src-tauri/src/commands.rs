@@ -12607,7 +12607,7 @@ fn apply_coach_settings(config: &mut Config, settings: CoachSettingsInput) -> Re
     config.copilot.fast_provider = match settings.model_choice.as_str() {
         COACH_MODEL_ON_DEVICE => "auto-local".into(),
         COACH_MODEL_CLOUD if config.copilot.allow_cloud => "cloud".into(),
-        COACH_MODEL_CLOUD => return Err("Cloud is not configured for Coach on this Mac.".into()),
+        COACH_MODEL_CLOUD => return Err("Cloud is not configured for Coach on this device.".into()),
         _ => return Err("Choose an AI model from the options shown.".into()),
     };
     Ok(())
@@ -12645,22 +12645,59 @@ fn resolve_coach_setup_binary(name: &str) -> Option<PathBuf> {
             return Some(path);
         }
     }
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-    let mut candidates = vec![
-        home.join(".local/bin").join(name),
-        PathBuf::from("/opt/homebrew/bin").join(name),
-        PathBuf::from("/usr/local/bin").join(name),
-        PathBuf::from("/usr/bin").join(name),
-    ];
-    if name == "ollama" {
-        candidates.push(PathBuf::from(
-            "/Applications/Ollama.app/Contents/Resources/ollama",
-        ));
-        candidates.push(home.join("Applications/Ollama.app/Contents/Resources/ollama"));
-    }
-    candidates
+
+    #[cfg(windows)]
+    {
+        if name != "ollama" {
+            return None;
+        }
+        let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+        let program_files = std::env::var_os("ProgramFiles").map(PathBuf::from);
+        let program_files_x86 = std::env::var_os("ProgramFiles(x86)").map(PathBuf::from);
+        windows_coach_ollama_install_paths(
+            local_app_data.as_deref(),
+            program_files.as_deref(),
+            program_files_x86.as_deref(),
+        )
         .into_iter()
         .find(|candidate| is_usable_agent_binary(candidate))
+    }
+
+    #[cfg(not(windows))]
+    {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+        let mut candidates = vec![
+            home.join(".local/bin").join(name),
+            PathBuf::from("/opt/homebrew/bin").join(name),
+            PathBuf::from("/usr/local/bin").join(name),
+            PathBuf::from("/usr/bin").join(name),
+        ];
+        if name == "ollama" {
+            candidates.push(PathBuf::from(
+                "/Applications/Ollama.app/Contents/Resources/ollama",
+            ));
+            candidates.push(home.join("Applications/Ollama.app/Contents/Resources/ollama"));
+        }
+        candidates
+            .into_iter()
+            .find(|candidate| is_usable_agent_binary(candidate))
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_coach_ollama_install_paths(
+    local_app_data: Option<&Path>,
+    program_files: Option<&Path>,
+    program_files_x86: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(root) = local_app_data {
+        candidates.push(root.join("Programs").join("Ollama").join("ollama.exe"));
+    }
+    for root in [program_files, program_files_x86].into_iter().flatten() {
+        candidates.push(root.join("Ollama").join("ollama.exe"));
+    }
+    candidates
 }
 
 fn run_coach_setup_step(program: &Path, args: &[&str], user_error: &str) -> Result<(), String> {
@@ -12700,7 +12737,7 @@ fn wait_for_coach_service() -> bool {
 
 fn install_coach_local_model(app: &tauri::AppHandle) -> Result<(), String> {
     if coach_local_model_readiness(&Config::load()).is_ready() {
-        emit_coach_setup_progress(app, "ready", "Coach is ready on this Mac.");
+        emit_coach_setup_progress(app, "ready", "Coach is ready on this computer.");
         return Ok(());
     }
 
@@ -12728,7 +12765,7 @@ fn install_coach_local_model(app: &tauri::AppHandle) -> Result<(), String> {
             run_coach_setup_step(
                 brew,
                 &["services", "start", "ollama"],
-                "Coach could not start the on-device AI. Restart your Mac, then try again.",
+                "Coach could not start the on-device AI. Open Ollama, then try again.",
             )?;
         } else {
             Command::new(&ollama)
@@ -12738,12 +12775,12 @@ fn install_coach_local_model(app: &tauri::AppHandle) -> Result<(), String> {
                 .stderr(Stdio::null())
                 .spawn()
                 .map_err(|_| {
-                    "Coach could not start the on-device AI. Restart your Mac, then try again."
+                    "Coach could not start the on-device AI. Open Ollama, then try again."
                         .to_string()
                 })?;
         }
         if !wait_for_coach_service() {
-            return Err("The on-device AI did not start. Restart your Mac, then try again.".into());
+            return Err("The on-device AI did not start. Open Ollama, then try again.".into());
         }
     }
 
@@ -12765,8 +12802,7 @@ fn install_coach_local_model(app: &tauri::AppHandle) -> Result<(), String> {
         .prewarm()
         .map_err(|error| {
             tracing::debug!(%error, "desktop Coach prewarm failed after setup");
-            "Coach finished setup but could not start. Restart your Mac, then try again."
-                .to_string()
+            "Coach finished setup but could not start. Open Ollama, then try again.".to_string()
         })?;
 
     let mut config = Config::load();
@@ -12781,7 +12817,7 @@ fn install_coach_local_model(app: &tauri::AppHandle) -> Result<(), String> {
     minutes_core::copilot::write_session_status(&status).map_err(|_| {
         "Coach is ready, but Minutes could not refresh its setup status.".to_string()
     })?;
-    emit_coach_setup_progress(app, "ready", "Coach is ready on this Mac.");
+    emit_coach_setup_progress(app, "ready", "Coach is ready on this computer.");
     Ok(())
 }
 
@@ -14714,6 +14750,34 @@ mod tests {
     }
 
     #[test]
+    fn coach_windows_ollama_candidates_cover_user_and_machine_installs() {
+        let candidates = windows_coach_ollama_install_paths(
+            Some(Path::new("local-app-data")),
+            Some(Path::new("program-files")),
+            Some(Path::new("program-files-x86")),
+        );
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("local-app-data")
+                    .join("Programs")
+                    .join("Ollama")
+                    .join("ollama.exe"),
+                PathBuf::from("program-files")
+                    .join("Ollama")
+                    .join("ollama.exe"),
+                PathBuf::from("program-files-x86")
+                    .join("Ollama")
+                    .join("ollama.exe"),
+            ]
+        );
+        assert!(candidates
+            .iter()
+            .all(|candidate| candidate.extension() == Some(std::ffi::OsStr::new("exe"))));
+        assert!(windows_coach_ollama_install_paths(None, None, None).is_empty());
+    }
+
+    #[test]
     fn coach_settings_bridge_updates_the_shared_copilot_config() {
         let mut config = Config::default();
         apply_coach_settings(
@@ -14753,7 +14817,7 @@ mod tests {
         };
         assert_eq!(
             apply_coach_settings(&mut config, input()).unwrap_err(),
-            "Cloud is not configured for Coach on this Mac."
+            "Cloud is not configured for Coach on this device."
         );
 
         config.copilot.allow_cloud = true;
