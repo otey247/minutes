@@ -157,10 +157,20 @@ If `CARGO_TARGET_DIR` is unset, use `target/release/examples/replay_sidecar.exe`
 The repeat count produces just over 15 minutes. Re-run short tests with callback
 sizes `1600` and `71,800,3199,160`, and omit Vulkan when testing CPU fallback.
 
-The existing real recording was left running. Replacing its installed CLI,
-restarting the desktop/MCP processes, and validating the EMEET microphone plus
-remote participants in Teams/Zoom require completing that recording first.
-Hardware acceptance must include short acknowledgments, continuous speech,
-silence, quiet speech, and stop/WAV preservation. Compare those finals against
-both a human reference and the same-model full-file baseline. Follow-up work is
-tracked in the local Beads store; this document records evidence, not task state.
+The existing real recording was left running during the September 30 repair.
+On October 1, no recording was active, so the patched CLI was installed in
+`~/.minutes/bin` with its Visual C++ runtime DLLs, and the verified `base.en`
+model was installed in `~/.minutes/models`. The previous config was backed up;
+`[live_transcript] model` changed from `tiny` to `base.en`, and its utterance cap
+was set to the replay-tested five seconds. A current-user
+NSIS desktop installer completed successfully, and the installed app launched.
+A fresh `minutes-mcp` 0.27.0 stdio session returned a successful
+`read_live_transcript` result against the installed CLI while idle. The EMEET
+SmartCam C960 4K microphone appears in `minutes devices`.
+
+Real EMEET capture and remote-participant validation in Teams/Zoom are still
+open. Hardware acceptance must include short acknowledgments, continuous
+speech, silence, quiet speech, and stop/WAV preservation. Compare those finals
+against both a human reference and the same-model full-file baseline. Follow-up
+work is tracked in the local Beads store; this document records evidence, not
+task state.

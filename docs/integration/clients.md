@@ -28,6 +28,25 @@ Minutes exposes a standard MCP server. Point any MCP-compatible client at it:
 }
 ```
 
+On Windows with a locally built Minutes CLI, install `minutes.exe` and its
+Visual C++ runtime DLLs in `~/.minutes/bin` as described in the
+[Windows live-transcription upgrade](../install.md#upgrade-a-local-windows-build-for-live-transcription).
+The MCP server checks that directory before an older Cargo install. Codex can
+use the standard stdio server in project `.codex/config.toml` or user
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.minutes]
+command = "npx"
+args = ["-y", "minutes-mcp"]
+```
+
+Restart Codex after replacing the CLI: the MCP server resolves the CLI path
+when it starts. During a recording, `read_live_transcript` with
+`include_current: true` returns finalized lines and, when fresh, one clearly
+provisional draft. The matching CLI check is
+`minutes transcript --since 30s --include-current`.
+
 #### Transports
 
 `minutes-mcp` speaks stdio by default, which is what the config above uses: the client spawns the server as a subprocess and owns its lifetime. Nothing changes for existing setups.

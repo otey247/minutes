@@ -69,6 +69,83 @@ cargo install --path crates/cli --no-default-features --features whisper
 > This is a [known upstream issue](https://github.com/silverstein/minutes/issues/27)
 > with `pyannote-rs`'s ONNX Runtime dependency. Everything except speaker labels works without it.
 
+#### Upgrade a local Windows build for live transcription
+
+Update both the CLI and desktop app, then restart the MCP server so it finds
+the new CLI. Finish and stop any recording before replacing binaries; `minutes stop` lets Minutes
+finalize and preserve its WAV. From the repository root in PowerShell, with the
+Rust/MSVC, LLVM, and Vulkan prerequisites above installed:
+
+```powershell
+$env:Path = "$HOME\.cargo\bin;$env:Path"
+$env:LIBCLANG_PATH = 'C:\Program Files\LLVM\bin' # Adjust to the directory containing libclang.dll
+$env:VULKAN_SDK = 'C:\VulkanSDK\<installed-version>' # Adjust to your Vulkan SDK root
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
+
+cargo build --release -p minutes-cli --features vulkan,pocketstation-capture
+cargo install tauri-cli --version 2.10.1 --locked
+Push-Location tauri/src-tauri
+cargo tauri build --ci --bundles nsis --no-sign --features vulkan,pocketstation-capture
+Pop-Location
+```
+
+Install the generated `target/release/bundle/nsis/*.exe` for the current user.
+It includes the desktop app and its Visual C++ runtime DLLs. To make the same
+source build available to terminal commands and the MCP server, place the CLI
+in the Minutes-owned directory and copy the four runtime DLLs staged by the
+desktop build:
+
+```powershell
+$binDir = Join-Path $HOME '.minutes\bin'
+New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+Copy-Item (Join-Path $env:CARGO_TARGET_DIR 'release\minutes.exe') $binDir -Force
+foreach ($dll in 'vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll','msvcp140_1.dll') {
+    Copy-Item (Join-Path 'tauri\src-tauri' $dll) $binDir -Force
+}
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$otherPaths = ($userPath -split ';' | Where-Object {
+    $_ -and ($_.TrimEnd('\') -ine $binDir.TrimEnd('\'))
+}) -join ';'
+[Environment]::SetEnvironmentVariable('Path', "$binDir;$otherPaths", 'User')
+$env:Path = "$binDir;$env:Path" # Current terminal; the user PATH applies to new terminals
+minutes --version
+```
+
+For English-only meetings, the `base.en` Whisper model is a more accurate live
+choice than `tiny` in our [Windows replay](investigations/windows-live-transcription-2026-09-30.md).
+The built-in `minutes setup --model` command does not offer `.en` variants, so
+download this model separately and verify it before selecting it:
+
+```powershell
+$modelDir = Join-Path $HOME '.minutes\models'
+New-Item -ItemType Directory -Path $modelDir -Force | Out-Null
+$modelFile = Join-Path $modelDir 'ggml-base.en.bin'
+Invoke-WebRequest 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' -OutFile $modelFile
+if ((Get-FileHash $modelFile -Algorithm SHA1).Hash -ne '137C40403D78FD54D454DA0F9BD998F78703390C') {
+    throw 'base.en model checksum mismatch; do not use this file'
+}
+```
+
+In `~/.config/minutes/config.toml` (or `$XDG_CONFIG_HOME/minutes/config.toml`
+when set), choose the live model without changing your batch transcription model:
+
+```toml
+[live_transcript]
+model = "base.en"
+max_utterance_secs = 5
+```
+
+Restart Minutes and the MCP client after upgrading so both load the new CLI
+and model. The five-second utterance cap is the profile used for the Windows
+replay and publishes final lines during longer speech. Run `minutes status`
+and `minutes transcript --status` to confirm the
+CLI is accessible and no old session remains. During a short recording, run
+`minutes transcript --since 30s --include-current`; finalized lines and one
+fresh provisional draft should appear as speech is captured. Drafts are not
+written to the durable transcript. Check the saved WAV after stopping. The
+`base.en` replay improved accuracy but did not meet the separate 15% word-error
+target, so use a representative real call before relying on the result.
+
 ### Linux
 
 ```bash
