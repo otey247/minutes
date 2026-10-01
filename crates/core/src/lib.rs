@@ -249,6 +249,8 @@ pub mod silero_vad;
 // matches the existing pattern at capture.rs:803.
 #[cfg(all(feature = "streaming", feature = "whisper"))]
 pub mod streaming_whisper;
+#[cfg(all(feature = "streaming", feature = "whisper"))]
+mod whisper_logging;
 
 // Dictation mode (requires streaming + whisper)
 #[cfg(all(feature = "streaming", feature = "whisper"))]
@@ -283,13 +285,12 @@ pub use vad::{Vad, VadEngine, VadResult};
 /// made the `whisper_vad_detect_speech: detect speech (X.XXs duration)`
 /// line flood terminals during a recording (issue #163).
 ///
-/// **Call exactly once at process startup, before any whisper context is
-/// created.** The underlying `whisper_rs::install_logging_hooks()` wires a
-/// global C-level trampoline that is permanent for the life of the
-/// process and cannot be replaced. Subsequent calls are silently ignored,
-/// so this is safe to call defensively from multiple entry points (CLI
-/// main, Tauri main, MCP server) but each entry point should call it at
-/// most once.
+/// **Call at process startup, before any whisper context is created.**
+/// With streaming enabled, Minutes retains whisper-rs's ggml hook and replaces
+/// only the Whisper callback so an intentionally aborted pass does not report
+/// an encode error.
+/// The hook is installed once per process, so entry points can call this
+/// defensively.
 ///
 /// If the host process has no tracing subscriber, the C log events
 /// become events with no recipient and are silently dropped. That is
@@ -300,7 +301,9 @@ pub use vad::{Vad, VadEngine, VadResult};
 /// On builds without the `whisper` feature this is a no-op so callers can
 /// invoke it unconditionally.
 pub fn install_whisper_logging_hooks() {
-    #[cfg(feature = "whisper")]
+    #[cfg(all(feature = "streaming", feature = "whisper"))]
+    whisper_logging::install();
+    #[cfg(all(feature = "whisper", not(feature = "streaming")))]
     whisper_rs::install_logging_hooks();
 }
 /// Whether a worker-capable binary sits beside the test harness, answered once.

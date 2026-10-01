@@ -69,7 +69,7 @@ cpal = { workspace = true }
 hound = { workspace = true }
 symphonia = { workspace = true }
 notify = { workspace = true }
-whisper-rs = { workspace = true, optional = true }
+whisper-rs = { workspace = true, optional = true, features = ["raw-api"] }
 ureq = { workspace = true }
 fs2 = { workspace = true }
 schemars = { workspace = true }

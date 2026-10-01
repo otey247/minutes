@@ -1,4 +1,5 @@
 use crate::transcribe::{set_abort_callback, streaming_whisper_params};
+use crate::whisper_logging::AbortLogScope;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
@@ -261,13 +262,19 @@ impl StreamingWhisper {
         // setter is unsound for capturing closures (see `set_abort_callback`).
         let abort_signal = self.abort_signal.clone();
         let work_abort_signal = self.work_abort_signal.clone();
+        let abort_fired = Arc::new(AtomicBool::new(false));
+        let callback_abort_fired = Arc::clone(&abort_fired);
         let abort_when_stopped = move || {
-            abort_signal
+            let should_abort = abort_signal
                 .as_ref()
                 .is_some_and(|signal| signal.load(Ordering::Relaxed))
                 || work_abort_signal
                     .as_ref()
-                    .is_some_and(|signal| signal.load(Ordering::Relaxed))
+                    .is_some_and(|signal| signal.load(Ordering::Relaxed));
+            if should_abort {
+                callback_abort_fired.store(true, Ordering::Release);
+            }
+            should_abort
         };
         if self.abort_signal.is_some() || self.work_abort_signal.is_some() {
             set_abort_callback(&mut params, &abort_when_stopped);
@@ -278,8 +285,14 @@ impl StreamingWhisper {
         let window_start = self.transcription_window_start(is_final);
         let transcription_audio = &self.audio_buffer[window_start..];
         WHISPER_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
-        if let Err(e) = state.full(params, transcription_audio) {
-            if abort_when_stopped() {
+        let full_result = {
+            let _abort_log_scope = AbortLogScope::enter(Arc::clone(&abort_fired));
+            state.full(params, transcription_audio)
+        };
+        if let Err(e) = full_result {
+            // Re-reading the stop signal here could misclassify a real encode
+            // failure if cancellation arrived only after Whisper returned.
+            if abort_fired.load(Ordering::Acquire) {
                 WHISPER_CANCELED.fetch_add(1, Ordering::Relaxed);
                 return None;
             }
