@@ -10,6 +10,7 @@ import {
   extractMacSherpaArchive,
   extractZipWithPowerShell,
   findSha256ForAsset,
+  grantWindowsSystemBinaryAccess,
   installMacSherpaArchiveWithFallback,
   MACOS_BARE_BINARY,
   MACOS_SHERPA_ARCHIVE,
@@ -286,5 +287,23 @@ describe("extractZipWithPowerShell", () => {
     const script = args[args.indexOf("-Command") + 1];
     expect(script).not.toContain("O'Brien");
     expect(options?.env?.MINUTES_ZIP_DEST).toBe(home);
+  });
+});
+
+describe("grantWindowsSystemBinaryAccess", () => {
+  it("grants the SYSTEM SID inherited read/execute on the bin only", async () => {
+    const calls: Array<{ file: string; args: readonly string[] }> = [];
+    const installDir = "C:\\Users\\qa\\.minutes\\bin";
+    await grantWindowsSystemBinaryAccess({
+      installDir,
+      execFileAsync: async (file, args) => {
+        calls.push({ file, args });
+      },
+    });
+
+    expect(calls).toEqual([{
+      file: "icacls.exe",
+      args: [installDir, "/grant", "*S-1-5-18:(OI)(CI)(RX)"],
+    }]);
   });
 });

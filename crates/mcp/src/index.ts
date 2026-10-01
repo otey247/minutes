@@ -94,6 +94,7 @@ import {
 import {
   downloadReleaseBinaryWithChecksum,
   extractZipWithPowerShell,
+  grantWindowsSystemBinaryAccess,
   installMacSherpaArchiveWithFallback,
   MACOS_SHERPA_ARCHIVE,
 } from "./autoInstall.js";
@@ -2392,6 +2393,7 @@ async function tryAutoInstallAttempt(capabilityRepair: boolean = false): Promise
         // gets this for free from rename(); without it a changed archive
         // layout would report success while MINUTES_BIN points at nothing.
         await stat(targetPath);
+        await grantWindowsSystemBinaryAccess({ installDir, execFileAsync });
       } else {
         console.error(
           `[Minutes] Selected ${binaryName}: this platform uses the standalone CLI asset`

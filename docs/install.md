@@ -102,6 +102,8 @@ Copy-Item (Join-Path $env:CARGO_TARGET_DIR 'release\minutes.exe') $binDir -Force
 foreach ($dll in 'vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll','msvcp140_1.dll') {
     Copy-Item (Join-Path 'tauri\src-tauri' $dll) $binDir -Force
 }
+& icacls.exe $binDir /grant '*S-1-5-18:(OI)(CI)(RX)' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not grant Windows audio services access to $binDir" }
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $otherPaths = ($userPath -split ';' | Where-Object {
     $_ -and ($_.TrimEnd('\') -ine $binDir.TrimEnd('\'))
@@ -110,6 +112,13 @@ $otherPaths = ($userPath -split ';' | Where-Object {
 $env:Path = "$binDir;$env:Path" # Current terminal; the user PATH applies to new terminals
 minutes --version
 ```
+
+This grants Windows audio services read/execute access to the CLI and its DLLs
+in `~/.minutes/bin`. Keep the parent `~/.minutes` directory private; it holds
+recordings and other user data. If an older CLI starts but recording fails with
+`Failed to initialize audio client: The parameter is incorrect`, rerun the
+`$binDir` assignment, the `icacls.exe` command, and its exit-code check above,
+then retry.
 
 For English-only meetings, the `base.en` Whisper model is a more accurate live
 choice than `tiny` in our [Windows replay](investigations/windows-live-transcription-2026-09-30.md).

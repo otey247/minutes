@@ -326,6 +326,20 @@ export async function extractZipWithPowerShell(options: {
   );
 }
 
+/** Allow Windows audio services to load the CLI and DLLs from the install bin.
+ * The parent ~/.minutes directory contains private data and must stay private.
+ */
+export async function grantWindowsSystemBinaryAccess(options: {
+  installDir: string;
+  execFileAsync: ExecFileAsync;
+}): Promise<void> {
+  await options.execFileAsync(
+    "icacls.exe",
+    [options.installDir, "/grant", "*S-1-5-18:(OI)(CI)(RX)"],
+    { timeout: 10000 }
+  );
+}
+
 export async function downloadReleaseBinaryWithChecksum(options: {
   binaryName: string;
   targetPath: string;
