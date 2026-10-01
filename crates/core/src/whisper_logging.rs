@@ -11,9 +11,10 @@ use whisper_rs::whisper_rs_sys::ggml_log_level;
 use whisper_rs::GGMLLogLevel;
 
 const CANCELED_ENCODE_LOG: &str = "whisper_full_with_state: failed to encode";
+const CANCELED_DECODE_LOG: &str = "whisper_full_with_state: failed to decode";
 
 thread_local! {
-    // whisper_full_with_state emits its encode error on the thread that called
+    // whisper_full_with_state emits its encode/decode error on the thread that called
     // WhisperState::full. The abort callback may run on a backend worker, so
     // its result is shared with that thread through an atomic flag.
     static ACTIVE_ABORT: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
@@ -70,7 +71,7 @@ unsafe extern "C" fn whisper_log(level: ggml_log_level, text: *const c_char, _: 
 
 fn is_expected_abort_log(level: &GGMLLogLevel, message: &str) -> bool {
     matches!(level, GGMLLogLevel::Error)
-        && message.trim() == CANCELED_ENCODE_LOG
+        && (message.trim() == CANCELED_ENCODE_LOG || message.trim() == CANCELED_DECODE_LOG)
         && ACTIVE_ABORT.with(|active| {
             active
                 .borrow()
@@ -152,17 +153,20 @@ mod tests {
                 };
             };
             emit(CANCELED_ENCODE_LOG); // Real failure: abort never fired.
+            emit(CANCELED_DECODE_LOG); // Real failure: abort never fired.
             aborted.store(true, Ordering::Release);
             emit(CANCELED_ENCODE_LOG); // Expected cancellation: hidden.
-            emit("whisper_full_with_state: failed to decode"); // Still visible.
+            emit(CANCELED_DECODE_LOG); // Expected cancellation: hidden.
+            emit("an unrelated whisper error"); // Unrelated error: visible.
         });
         let output = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
         assert_eq!(output.matches(CANCELED_ENCODE_LOG).count(), 1);
-        assert!(output.contains("whisper_full_with_state: failed to decode"));
+        assert_eq!(output.matches(CANCELED_DECODE_LOG).count(), 1);
+        assert!(output.contains("an unrelated whisper error"));
     }
 
     #[test]
-    fn only_an_abort_from_the_active_pass_suppresses_the_exact_encode_error() {
+    fn only_an_abort_from_the_active_pass_suppresses_exact_encode_and_decode_errors() {
         let aborted = Arc::new(AtomicBool::new(false));
         assert!(!is_expected_abort_log(
             &GGMLLogLevel::Error,
@@ -175,10 +179,18 @@ mod tests {
                 &GGMLLogLevel::Error,
                 CANCELED_ENCODE_LOG
             ));
+            assert!(!is_expected_abort_log(
+                &GGMLLogLevel::Error,
+                CANCELED_DECODE_LOG
+            ));
             aborted.store(true, Ordering::Release);
             assert!(is_expected_abort_log(
                 &GGMLLogLevel::Error,
                 CANCELED_ENCODE_LOG
+            ));
+            assert!(is_expected_abort_log(
+                &GGMLLogLevel::Error,
+                CANCELED_DECODE_LOG
             ));
             assert!(!is_expected_abort_log(
                 &GGMLLogLevel::Warn,
@@ -186,10 +198,11 @@ mod tests {
             ));
             assert!(!is_expected_abort_log(
                 &GGMLLogLevel::Error,
-                "whisper_full_with_state: failed to decode"
+                "whisper_full_with_state: failed to decode other"
             ));
             assert!(!std::thread::spawn(|| {
                 is_expected_abort_log(&GGMLLogLevel::Error, CANCELED_ENCODE_LOG)
+                    || is_expected_abort_log(&GGMLLogLevel::Error, CANCELED_DECODE_LOG)
             })
             .join()
             .unwrap());
@@ -198,6 +211,10 @@ mod tests {
         assert!(!is_expected_abort_log(
             &GGMLLogLevel::Error,
             CANCELED_ENCODE_LOG
+        ));
+        assert!(!is_expected_abort_log(
+            &GGMLLogLevel::Error,
+            CANCELED_DECODE_LOG
         ));
     }
 

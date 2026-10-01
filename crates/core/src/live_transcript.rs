@@ -894,6 +894,9 @@ pub fn normalize_live_transcript_text(text: &str) -> Option<String> {
 
     let normalized_lines = strip_foreign_script(normalized_lines);
     let normalized_lines = collapse_noise_markers(normalized_lines);
+    // The same exact-phrase guard used by batch transcription catches
+    // Whisper's common closing-credit hallucinations on quiet live audio.
+    let normalized_lines = whisper_guard::segments::strip_known_hallucinations(&normalized_lines);
     let normalized_lines: Vec<String> = normalized_lines
         .into_iter()
         .filter_map(|line| {
@@ -5992,6 +5995,19 @@ mod tests {
         assert_eq!(normalize_live_transcript_text("[typing]"), None);
         assert_eq!(normalize_live_transcript_text("[BLANK_AUDIO]"), None);
         assert_eq!(normalize_live_transcript_text("[Musik]"), None);
+    }
+
+    #[test]
+    fn normalize_live_transcript_text_filters_known_whisper_hallucinations() {
+        assert_eq!(normalize_live_transcript_text("Thanks for watching!"), None);
+        assert_eq!(
+            normalize_live_transcript_text("[0:00] Actual speech\n[0:03] Thanks for watching!"),
+            Some("Actual speech".to_string())
+        );
+        assert_eq!(
+            normalize_live_transcript_text("Thanks for watching the demo carefully"),
+            Some("Thanks for watching the demo carefully".to_string())
+        );
     }
 
     #[test]
